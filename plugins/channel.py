@@ -10,7 +10,7 @@ from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BA
 from Script import script
 from database.ia_filterdb import save_file
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from utils import temp
+from utils import temp, users_broadcast, groups_broadcast
 from pymongo.errors import PyMongoError, DuplicateKeyError
 from pyrogram.errors import MessageIdInvalid, MessageNotModified, FloodWait
 from typing import Optional, Tuple
@@ -198,6 +198,30 @@ def extract_media_info(filename: str, caption: str):
         "language": language
     }
 
+async def broadcast_new_movie(bot, message):
+    """
+    Broadcasts the new movie update to all users and groups.
+    """
+    users = await db.get_all_users()
+    chats = await db.get_all_chats()
+
+    # Broadcast to all users
+    async for user in users:
+        try:
+            await users_broadcast(int(user["id"]), message, is_pin=False)
+            await asyncio.sleep(0.1)  # To avoid API flood
+        except Exception as e:
+            logger.error(f"Error broadcasting to user {user['id']}: {e}")
+
+    # Broadcast to all groups
+    async for chat in chats:
+        try:
+            await groups_broadcast(int(chat['id']), message, is_pin=False)
+            await asyncio.sleep(0.1)  # To avoid API flood
+        except Exception as e:
+            logger.error(f"Error broadcasting to group {chat['id']}: {e}")
+
+
 @Client.on_message(filters.chat(CHANNELS) & MEDIA_FILTER)
 async def media_handler(bot, message):
     media = next(
@@ -284,7 +308,9 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
         }
         try:
             await db.movie_updates.insert_one(movie_doc)
-            await send_movie_update(bot, base_name)
+            update_message = await send_movie_update(bot, base_name)
+            if update_message:
+                await broadcast_new_movie(bot, update_message)
             movie_doc = await db.movie_updates.find_one({"_id": base_name})
         except DuplicateKeyError:
             movie_doc = await db.movie_updates.find_one({"_id": base_name})
@@ -494,5 +520,5 @@ def generate_movie_message(movie_doc, base_name):
         language=language_str,
         episodes=epi_block,
         rating=movie_doc.get("rating", "N/A"),
-        search_link=temp.B_LINK
+        search_link=f"https://t.me/XploreFlix_1080"
     )
